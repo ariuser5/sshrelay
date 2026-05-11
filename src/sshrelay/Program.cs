@@ -8,8 +8,6 @@ if (builtInVersionOption is not null)
     builtInVersionOption.Aliases.Add("-v");
 }
 
-rootCommand.SetAction(_ => rootCommand.Parse("--help").Invoke());
-
 var relayCommand = new Command("relay", "Placeholder command for future SSH command relaying");
 relayCommand.SetAction(_ =>
 {
