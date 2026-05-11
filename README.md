@@ -58,13 +58,13 @@ dotnet build sshrelay.sln
 ### Run
 
 ```bash
-dotnet run --project /home/runner/work/sshrelay/sshrelay/src/sshrelay/sshrelay.csproj -- --help
+dotnet run --project src/sshrelay/sshrelay.csproj -- --help
 ```
 
 Try the placeholder command:
 
 ```bash
-dotnet run --project /home/runner/work/sshrelay/sshrelay/src/sshrelay/sshrelay.csproj -- relay
+dotnet run --project src/sshrelay/sshrelay.csproj -- relay
 ```
 
 ## Security considerations (important)
