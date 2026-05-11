@@ -10,7 +10,7 @@ public sealed class DummyConnection : IConnection
     private readonly IReadOnlyDictionary<string, string> _responses;
 
     /// <summary>
-    /// Initialises the dummy connection with an optional command→response map.
+    /// Initializes the dummy connection with an optional command→response map.
     /// Commands not present in the map are answered with "echo: {command}".
     /// </summary>
     /// <param name="responses">Optional fixed response map.</param>

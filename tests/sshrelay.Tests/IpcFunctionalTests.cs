@@ -140,7 +140,8 @@ public sealed class IpcFunctionalTests
             var client = new RelayClient(pipe);
             const int count = 5;
 
-            // Run clients sequentially to avoid hitting the single-instance pipe limit.
+            // Each SendCommandAsync opens its own pipe connection; the server's
+            // fire-and-forget accept loop handles them one after another.
             var responses = new List<string>();
             for (int i = 0; i < count; i++)
             {

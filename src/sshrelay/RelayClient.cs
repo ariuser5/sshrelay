@@ -50,14 +50,20 @@ public sealed class RelayClient
         var writer = new StreamWriter(clientStream, leaveOpen: true) { AutoFlush = true };
         using var reader = new StreamReader(clientStream, leaveOpen: true);
 
-        await writer.WriteLineAsync(command.AsMemory(), cts.Token);
-        var response = await reader.ReadLineAsync(cts.Token);
+        string response;
+        try
+        {
+            await writer.WriteLineAsync(command.AsMemory(), cts.Token);
+            response = await reader.ReadLineAsync(cts.Token) ?? string.Empty;
+        }
+        finally
+        {
+            // The server disconnects the pipe after it sends its response.
+            // Suppress the resulting IOException that occurs when the writer
+            // tries to flush its internal buffer on disposal.
+            try { await writer.DisposeAsync(); } catch (IOException) { }
+        }
 
-        // The server disconnects the pipe after it sends its response.
-        // Suppress the resulting IOException that occurs when the writer
-        // tries to flush its internal buffer on disposal.
-        try { await writer.DisposeAsync(); } catch (IOException) { }
-
-        return response ?? string.Empty;
+        return response;
     }
 }
