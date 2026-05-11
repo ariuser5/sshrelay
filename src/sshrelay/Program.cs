@@ -8,11 +8,7 @@ if (builtInVersionOption is not null)
     builtInVersionOption.Aliases.Add("-v");
 }
 
-rootCommand.SetAction(_ =>
-{
-    Console.WriteLine("Use --help to see available commands.");
-    return 0;
-});
+rootCommand.SetAction(_ => rootCommand.Parse("--help").Invoke());
 
 var relayCommand = new Command("relay", "Placeholder command for future SSH command relaying");
 relayCommand.SetAction(_ =>
@@ -23,11 +19,6 @@ relayCommand.SetAction(_ =>
 });
 
 rootCommand.Add(relayCommand);
-
-if (args.Length == 0)
-{
-    args = new[] { "--help" };
-}
 
 var parseResult = rootCommand.Parse(args);
 return await parseResult.InvokeAsync();
