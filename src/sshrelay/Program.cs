@@ -29,19 +29,27 @@ var serveVerboseOption = new Option<bool>("--verbose")
     DefaultValueFactory = _ => false
 };
 
+var serveIdentityFileOption = new Option<string?>("--identity-file", "-i")
+{
+    Description = "Path to the SSH private key file (same semantics as ssh -i).",
+    DefaultValueFactory = _ => null
+};
+
 var serveCommand = new Command("serve", "Start the relay IPC server.");
 serveCommand.Add(servePipeOption);
 serveCommand.Add(serveDummyOption);
 serveCommand.Add(serveVerboseOption);
+serveCommand.Add(serveIdentityFileOption);
 serveCommand.SetAction(async (parseResult, ct) =>
 {
     var pipeName = parseResult.GetValue(servePipeOption)!;
     var useDummy = parseResult.GetValue(serveDummyOption);
     var verbose = parseResult.GetValue(serveVerboseOption);
+    var identityFile = parseResult.GetValue(serveIdentityFileOption);
     
     IConnection connection = useDummy
         ? new DummyConnection()
-        : new SshConnection("localhost", Environment.UserName);
+        : new SshConnection("localhost", Environment.UserName, identityFilePath: identityFile);
 
     Console.WriteLine($"Starting relay server on pipe '{pipeName}' " +
                       $"(connection: {connection.GetType().Name})...");

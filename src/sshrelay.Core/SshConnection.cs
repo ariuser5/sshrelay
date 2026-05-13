@@ -11,15 +11,17 @@ public sealed class SshConnection : IConnection
     private readonly string _host;
     private readonly int _port;
     private readonly string _username;
+    private readonly string? _identityFilePath;
 
     /// <summary>
     /// Creates a new <see cref="SshConnection"/> targeting the given host.
     /// </summary>
-    public SshConnection(string host, string username, int port = 22)
+    public SshConnection(string host, string username, int port = 22, string? identityFilePath = null)
     {
         _host = host;
         _username = username;
         _port = port;
+        _identityFilePath = identityFilePath;
     }
 
     /// <inheritdoc/>
@@ -28,8 +30,12 @@ public sealed class SshConnection : IConnection
     /// <inheritdoc/>
     public Task<string> ExecuteAsync(string command, CancellationToken cancellationToken = default)
     {
+        var identityHint = string.IsNullOrWhiteSpace(_identityFilePath)
+            ? string.Empty
+            : $" with identity file '{_identityFilePath}'";
+
         throw new NotImplementedException(
-            $"Real SSH transport to {_username}@{_host}:{_port} is not yet implemented. " +
+            $"Real SSH transport to {_username}@{_host}:{_port}{identityHint} is not yet implemented. " +
             "Use DummyConnection for testing.");
     }
 }
