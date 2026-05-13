@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\sshrelay\sshrelay.csproj" />
+    <ProjectReference Include="..\..\src\sshrelay.Core\sshrelay.Core.csproj" />
   </ItemGroup>
 
 </Project>

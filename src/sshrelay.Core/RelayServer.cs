@@ -1,4 +1,6 @@
 using System.IO.Pipes;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SshRelay;
 
@@ -18,6 +20,7 @@ public sealed class RelayServer
 {
     private readonly IConnection _connection;
     private readonly string _pipeName;
+    private readonly ILogger<RelayServer> _logger;
 
     /// <summary>
     /// Creates a <see cref="RelayServer"/> that uses <paramref name="connection"/>
@@ -25,10 +28,11 @@ public sealed class RelayServer
     /// </summary>
     /// <param name="connection">The backend connection to forward commands to.</param>
     /// <param name="pipeName">Name of the local named pipe (default: <c>sshrelay</c>).</param>
-    public RelayServer(IConnection connection, string pipeName = "sshrelay")
+    public RelayServer(IConnection connection, string pipeName = "sshrelay", ILogger<RelayServer>? logger = null)
     {
         _connection = connection;
         _pipeName = pipeName;
+        _logger = logger ?? NullLogger<RelayServer>.Instance;
     }
 
     /// <summary>
@@ -37,6 +41,8 @@ public sealed class RelayServer
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Relay server listening on pipe '{PipeName}'.", _pipeName);
+
         while (!cancellationToken.IsCancellationRequested)
         {
             var serverStream = new NamedPipeServerStream(
@@ -49,10 +55,12 @@ public sealed class RelayServer
             try
             {
                 await serverStream.WaitForConnectionAsync(cancellationToken);
+                _logger.LogDebug("Client connected.");
             }
             catch (OperationCanceledException)
             {
                 await serverStream.DisposeAsync();
+                _logger.LogDebug("Relay server stopping.");
                 break;
             }
 
@@ -64,6 +72,8 @@ public sealed class RelayServer
 
     private async Task HandleClientAsync(NamedPipeServerStream serverStream, CancellationToken cancellationToken)
     {
+        _logger.LogDebug("Handling client connection.");
+        
         await using (serverStream)
         {
             using var reader = new StreamReader(serverStream, leaveOpen: true);
@@ -91,6 +101,8 @@ public sealed class RelayServer
                     // End-of-stream: client closed its write side.
                     break;
                 }
+                
+                _logger.LogDebug("Received command: '{Command}'.", command);
 
                 string result;
                 try
@@ -99,6 +111,7 @@ public sealed class RelayServer
                 }
                 catch (Exception ex)
                 {
+                    _logger.LogError(ex, "Command execution failed for '{Command}'.", command);
                     result = $"ERROR: {ex.Message}";
                 }
 
@@ -120,6 +133,8 @@ public sealed class RelayServer
             {
                 serverStream.Disconnect();
             }
+
+            _logger.LogDebug("Client disconnected.");
         }
     }
 }
