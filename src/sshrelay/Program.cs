@@ -1,22 +1,93 @@
 using System.CommandLine;
+using Microsoft.Extensions.Logging;
+using SshRelay;
 
-var rootCommand = new RootCommand("A starter CLI for relaying commands through an existing SSH session.");
+var rootCommand = new RootCommand("A CLI for relaying commands through an existing SSH session.");
 
 var builtInVersionOption = rootCommand.Options.OfType<VersionOption>().FirstOrDefault();
-if (builtInVersionOption is not null)
-{
-    builtInVersionOption.Aliases.Add("-v");
-}
+builtInVersionOption?.Aliases.Add("-v");
 
-var relayCommand = new Command("relay", "Placeholder command for future SSH command relaying");
-relayCommand.SetAction(_ =>
+// ── serve ──────────────────────────────────────────────────────────────────
+// Starts the relay IPC server.  --dummy uses DummyConnection; in the future
+// --ssh will use a real SSH session.
+
+var servePipeOption = new Option<string>("--pipe", "-p")
 {
-    Console.WriteLine("relay command scaffolded: SSH session broker integration is not implemented yet.");
-    Console.WriteLine("Use this starter to build session registration, command queuing, and execution relaying.");
+	Description = "Named pipe name for the relay server to listen on.",
+	DefaultValueFactory = _ => "sshrelay"
+};
+
+var serveDummyOption = new Option<bool>("--dummy")
+{
+	Description = "Use a dummy connection instead of a real SSH session (for testing).",
+	DefaultValueFactory = _ => false
+};
+
+var serveVerboseOption = new Option<bool>("--verbose")
+{
+    Description = "Enable debug logging output.",
+    DefaultValueFactory = _ => false
+};
+
+var serveCommand = new Command("serve", "Start the relay IPC server.");
+serveCommand.Add(servePipeOption);
+serveCommand.Add(serveDummyOption);
+serveCommand.Add(serveVerboseOption);
+serveCommand.SetAction(async (parseResult, ct) =>
+{
+    var pipeName = parseResult.GetValue(servePipeOption)!;
+    var useDummy = parseResult.GetValue(serveDummyOption);
+    var verbose = parseResult.GetValue(serveVerboseOption);
+    
+    IConnection connection = useDummy
+        ? new DummyConnection()
+        : new SshConnection("localhost", Environment.UserName);
+
+    Console.WriteLine($"Starting relay server on pipe '{pipeName}' " +
+                      $"(connection: {connection.GetType().Name})...");
+    Console.WriteLine("Press Ctrl+C to stop.");
+
+    var minimumLevel = verbose ? LogLevel.Debug : LogLevel.Information;
+    using var loggerFactory = LoggerFactory.Create(b =>
+    {
+        b.AddConsole();
+        b.SetMinimumLevel(minimumLevel);
+    });
+    var logger = loggerFactory.CreateLogger<RelayServer>();
+    var server = new RelayServer(connection, pipeName, logger);
+    await server.RunAsync(ct);
     return 0;
 });
 
-rootCommand.Add(relayCommand);
+rootCommand.Add(serveCommand);
+
+// ── exec ───────────────────────────────────────────────────────────────────
+// Sends a single command to the relay server and prints the response.
+
+var execPipeOption = new Option<string>("--pipe", "-p")
+{
+    Description = "Named pipe name of the running relay server.",
+    DefaultValueFactory = _ => "sshrelay"
+};
+
+var execCommandArg = new Argument<string>("command");
+execCommandArg.Description = "The command to relay.";
+
+var execCommand = new Command("exec", "Send a command to the relay server and print the response.");
+execCommand.Add(execPipeOption);
+execCommand.Add(execCommandArg);
+execCommand.SetAction(async (parseResult, ct) =>
+{
+    var pipeName = parseResult.GetValue(execPipeOption)!;
+    var cmd = parseResult.GetValue(execCommandArg)!;
+
+    var client = new RelayClient(pipeName);
+    var response = await client.SendCommandAsync(cmd, ct);
+    Console.WriteLine(response);
+    return 0;
+});
+
+rootCommand.Add(execCommand);
 
 var parseResult = rootCommand.Parse(args);
 return await parseResult.InvokeAsync();
