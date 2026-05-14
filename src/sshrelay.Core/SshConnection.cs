@@ -139,7 +139,7 @@ public sealed class SshConnection : IConnection
         _logger.LogDebug("SSH command completed successfully.");
         
         var result = stdout.TrimEnd('\r', '\n');
-        _logger.LogDebug("SSH command output: {Output}", result);
+        _logger.LogTrace("SSH command output: {Output}", result);
         return result;
     }
 }

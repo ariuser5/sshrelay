@@ -29,6 +29,12 @@ var serveVerboseOption = new Option<bool>("--verbose")
     DefaultValueFactory = _ => false
 };
 
+var serveLogLevelOption = new Option<string?>("--log-level", "-l")
+{
+    Description = "Minimum log level: trace, debug, information, warning, error, critical, none.",
+    DefaultValueFactory = _ => null
+};
+
 var serveIdentityFileOption = new Option<string?>("--identity-file", "-i")
 {
     Description = "Path to the SSH private key file (same semantics as ssh -i).",
@@ -39,15 +45,17 @@ var serveCommand = new Command("serve", "Start the relay IPC server.");
 serveCommand.Add(servePipeOption);
 serveCommand.Add(serveDummyOption);
 serveCommand.Add(serveVerboseOption);
+serveCommand.Add(serveLogLevelOption);
 serveCommand.Add(serveIdentityFileOption);
 serveCommand.SetAction(async (parseResult, ct) =>
 {
     var pipeName = parseResult.GetValue(servePipeOption)!;
     var useDummy = parseResult.GetValue(serveDummyOption);
     var verbose = parseResult.GetValue(serveVerboseOption);
+    var logLevelText = parseResult.GetValue(serveLogLevelOption);
     var identityFile = parseResult.GetValue(serveIdentityFileOption);
 
-    var minimumLevel = verbose ? LogLevel.Debug : LogLevel.Information;
+    var minimumLevel = ResolveLogLevel(logLevelText, verbose);
     using var loggerFactory = LoggerFactory.Create(b =>
     {
         b.AddConsole();
@@ -102,3 +110,19 @@ rootCommand.Add(execCommand);
 
 var parseResult = rootCommand.Parse(args);
 return await parseResult.InvokeAsync();
+
+static LogLevel ResolveLogLevel(string? value, bool verbose)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return verbose ? LogLevel.Debug : LogLevel.Information;
+    }
+
+    if (Enum.TryParse<LogLevel>(value, ignoreCase: true, out var parsed))
+    {
+        return parsed;
+    }
+
+    throw new ArgumentException(
+        "Invalid --log-level value. Expected one of: trace, debug, information, warning, error, critical, none.");
+}
