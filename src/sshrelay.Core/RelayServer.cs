@@ -72,7 +72,7 @@ public sealed class RelayServer
 
     private async Task HandleClientAsync(NamedPipeServerStream serverStream, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Handling client connection.");
+        _logger.LogDebug("Begin handling client command.");
         
         await using (serverStream)
         {
@@ -114,6 +114,8 @@ public sealed class RelayServer
                     _logger.LogError(ex, "Command execution failed for '{Command}'.", command);
                     result = $"ERROR: {ex.Message}";
                 }
+                
+                _logger.LogTrace("Command result: '{Result}'.", result);
 
                 try
                 {
@@ -134,7 +136,7 @@ public sealed class RelayServer
                 serverStream.Disconnect();
             }
 
-            _logger.LogDebug("Client disconnected.");
+            _logger.LogDebug("Client command completed.");
         }
     }
 }

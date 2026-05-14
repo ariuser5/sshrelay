@@ -32,7 +32,7 @@
             "args": ["exec", "--pipe", "sshrelay", "echo hello"],
             "cwd": "${workspaceFolder}",
             "stopAtEntry": false,
-            "console": "internalConsole"
+            "console": "integratedTerminal"
         }
     ]
 }

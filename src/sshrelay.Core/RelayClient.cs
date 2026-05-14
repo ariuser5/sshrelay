@@ -1,4 +1,6 @@
 using System.IO.Pipes;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SshRelay;
 
@@ -9,7 +11,7 @@ namespace SshRelay;
 public sealed class RelayClient
 {
     private readonly string _pipeName;
-    private readonly int _connectTimeoutMs;
+    private readonly ILogger<RelayClient> _logger;
 
     /// <summary>
     /// Creates a <see cref="RelayClient"/> targeting the named pipe
@@ -19,11 +21,22 @@ public sealed class RelayClient
     /// <param name="connectTimeoutMs">
     /// Milliseconds to wait when connecting to the pipe server (default: 5000).
     /// </param>
-    public RelayClient(string pipeName = "sshrelay", int connectTimeoutMs = 5_000)
+    /// <param name="logger">Optional logger; falls back to a no-op logger when not provided.</param>
+    public RelayClient(string pipeName = "sshrelay", ILogger<RelayClient>? logger = null)
     {
         _pipeName = pipeName;
-        _connectTimeoutMs = connectTimeoutMs;
+        _logger = logger ?? NullLogger<RelayClient>.Instance;
     }
+
+    /// <summary>
+    /// Milliseconds to wait when connecting to the pipe server (default: 5000).
+    /// </summary>    
+    public int ConnectTimeoutMs { get; set; } = 5_000;
+    
+    /// <summary>
+    /// Milliseconds to wait for a response from the server after sending a command (default: 10000).
+    /// </summary>
+    public int CommandTimeoutMs { get; set; } = 10_000;
 
     /// <summary>
     /// Sends <paramref name="command"/> to the relay server and returns the response.
@@ -36,25 +49,68 @@ public sealed class RelayClient
         string command,
         CancellationToken cancellationToken = default)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(_connectTimeoutMs);
+        _logger.LogDebug("Connecting to pipe '{PipeName}'.", _pipeName);
 
         await using var clientStream = new NamedPipeClientStream(
             ".",
             _pipeName,
             PipeDirection.InOut,
             PipeOptions.Asynchronous);
+        
+        await ConnectWithTimeoutAsync(clientStream, ConnectTimeoutMs, cancellationToken);
 
-        await clientStream.ConnectAsync(cts.Token);
+        if (!clientStream.IsConnected)
+            throw new IOException($"Failed to connect to the relay server on pipe '{_pipeName}'.");
+            
+        _logger.LogDebug("Sending command...");
+        _logger.LogTrace("Sending raw command: {Command}", command);
 
+        string response = await StreamCommand(clientStream, command, CommandTimeoutMs, cancellationToken);
+        
+        _logger.LogDebug("Received response.");
+        _logger.LogTrace("Raw response: {Response}", response);
+        
+        return response;
+    }
+    
+    private static async Task ConnectWithTimeoutAsync(
+        NamedPipeClientStream clientStream,
+        int timeoutMs,
+        CancellationToken cancellationToken = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeoutMs);
+        try 
+        {
+            await clientStream.ConnectAsync(cts.Token);
+            
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Failed to connect to the relay server within {timeoutMs}ms.");
+        }
+    }
+    
+    private static async Task<string> StreamCommand(
+        Stream clientStream,
+        string command,
+        int timeoutMs,
+        CancellationToken cancellationToken = default)
+    {
         var writer = new StreamWriter(clientStream, leaveOpen: true) { AutoFlush = true };
         using var reader = new StreamReader(clientStream, leaveOpen: true);
-
+        
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeoutMs);
         string response;
         try
         {
             await writer.WriteLineAsync(command.AsMemory(), cts.Token);
             response = await reader.ReadLineAsync(cts.Token) ?? string.Empty;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("No response received from the relay server within the allotted time.");
         }
         finally
         {
