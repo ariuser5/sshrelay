@@ -46,14 +46,6 @@ serveCommand.SetAction(async (parseResult, ct) =>
     var useDummy = parseResult.GetValue(serveDummyOption);
     var verbose = parseResult.GetValue(serveVerboseOption);
     var identityFile = parseResult.GetValue(serveIdentityFileOption);
-    
-    IConnection connection = useDummy
-        ? new DummyConnection()
-        : new SshConnection("localhost", Environment.UserName, identityFilePath: identityFile);
-
-    Console.WriteLine($"Starting relay server on pipe '{pipeName}' " +
-                      $"(connection: {connection.GetType().Name})...");
-    Console.WriteLine("Press Ctrl+C to stop.");
 
     var minimumLevel = verbose ? LogLevel.Debug : LogLevel.Information;
     using var loggerFactory = LoggerFactory.Create(b =>
@@ -61,8 +53,19 @@ serveCommand.SetAction(async (parseResult, ct) =>
         b.AddConsole();
         b.SetMinimumLevel(minimumLevel);
     });
-    var logger = loggerFactory.CreateLogger<RelayServer>();
-    var server = new RelayServer(connection, pipeName, logger);
+
+    var relayLogger = loggerFactory.CreateLogger<RelayServer>();
+    var sshLogger = loggerFactory.CreateLogger<SshConnection>();
+    
+    IConnection connection = useDummy
+        ? new DummyConnection()
+        : new SshConnection("localhost", Environment.UserName, identityFilePath: identityFile, logger: sshLogger);
+
+    Console.WriteLine($"Starting relay server on pipe '{pipeName}' " +
+                      $"(connection: {connection.GetType().Name})...");
+    Console.WriteLine("Press Ctrl+C to stop.");
+
+    var server = new RelayServer(connection, pipeName, relayLogger);
     await server.RunAsync(ct);
     return 0;
 });
