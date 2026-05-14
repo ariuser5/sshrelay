@@ -8,7 +8,11 @@ internal static class LoggingHelper
 	{
 		return LoggerFactory.Create(b =>
 		{
-			b.AddConsole();
+			b.AddSimpleConsole(o =>
+			{
+				o.SingleLine = true;
+				o.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
+			});
 			b.SetMinimumLevel(minimumLevel);
 		});
 	}
