@@ -127,12 +127,13 @@ public sealed class SshConnection : IConnection
             _isConnected = false;
 
             var details = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+            var hint = BuildAuthenticationHint(details);
             _logger.LogWarning(
                 "SSH command failed with exit code {ExitCode}. Error: {Error}",
                 process.ExitCode,
                 details.Trim());
             throw new InvalidOperationException(
-                $"SSH command failed with exit code {process.ExitCode}: {details.Trim()}");
+                $"SSH command failed with exit code {process.ExitCode}: {details.Trim()}{hint}");
         }
 
         _isConnected = true;
@@ -141,5 +142,19 @@ public sealed class SshConnection : IConnection
         var result = stdout.TrimEnd('\r', '\n');
         _logger.LogTrace("SSH command output: {Output}", result);
         return result;
+    }
+
+    private static string BuildAuthenticationHint(string details)
+    {
+        if (string.IsNullOrWhiteSpace(details))
+            return string.Empty;
+
+        if (details.Contains("Permission denied (publickey)", StringComparison.OrdinalIgnoreCase) ||
+            details.Contains("passphrase", StringComparison.OrdinalIgnoreCase))
+        {
+            return " If your key is passphrase-protected, load it into ssh-agent first (for example: 'ssh-add <keyfile>') and retry.";
+        }
+
+        return string.Empty;
     }
 }

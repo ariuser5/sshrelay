@@ -43,6 +43,10 @@ public sealed class RelayServer
     {
         _logger.LogInformation("Relay server listening on pipe '{PipeName}'.", _pipeName);
 
+        _logger.LogDebug("Probing connection before accepting clients...");
+        var probe = await _connection.ExecuteAsync("echo sshrelay-probe", cancellationToken);
+        _logger.LogDebug("Connection probe succeeded: {ProbeResult}", probe.Trim());
+
         while (!cancellationToken.IsCancellationRequested)
         {
             var serverStream = new NamedPipeServerStream(
