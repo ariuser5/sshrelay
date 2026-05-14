@@ -38,11 +38,11 @@ internal static class ServeCommand
 			var logLevel = LoggingHelper.ResolveLogLevel(logLevelText, verbose);
             using var loggerFactory = LoggingHelper.CreateLoggerFactory(logLevel);
             var relayLogger = loggerFactory.CreateLogger<RelayServer>();
-            var sshLogger = loggerFactory.CreateLogger<SshConnection>();
+            var sshLogger = loggerFactory.CreateLogger<SshShellConnection>();
 
             IConnection connection = useDummy
                 ? new DummyConnection()
-                : new SshConnection(host, username, port, identityFile, sshLogger);
+                : new SshShellConnection(host, username, port, identityFile, sshLogger);
 
             Console.WriteLine(
 				$"Starting relay server on pipe '{pipeName}' " +
@@ -51,6 +51,10 @@ internal static class ServeCommand
 
             var server = new RelayServer(connection, pipeName, relayLogger);
             await server.RunAsync(ct);
+
+            if (connection is IAsyncDisposable disposable)
+                await disposable.DisposeAsync();
+
             return 0;
         });
 
