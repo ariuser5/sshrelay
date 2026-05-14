@@ -123,7 +123,10 @@ public sealed class RelayServer
 
                 try
                 {
-                    await writer.WriteLineAsync(result.AsMemory(), cancellationToken);
+                    // Base64-encode so the entire response fits on one wire line regardless of content.
+                    await writer.WriteLineAsync(
+                        Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(result)).AsMemory(),
+                        cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {

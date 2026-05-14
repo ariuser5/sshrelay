@@ -106,7 +106,10 @@ public sealed class RelayClient
         try
         {
             await writer.WriteLineAsync(command.AsMemory(), cts.Token);
-            response = await reader.ReadLineAsync(cts.Token) ?? string.Empty;
+            var encoded = await reader.ReadLineAsync(cts.Token) ?? string.Empty;
+            response = encoded.Length == 0
+                ? string.Empty
+                : System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
