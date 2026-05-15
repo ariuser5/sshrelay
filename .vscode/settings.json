@@ -2,6 +2,7 @@
     "dotnet.defaultSolution": "sshrelay.sln",
     "files.exclude": {
         "**/bin": true,
-        "**/obj": true
+        "**/obj": true,
+        "**/*.lscache": true,
     }
 }
