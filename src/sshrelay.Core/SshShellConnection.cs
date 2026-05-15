@@ -90,7 +90,7 @@ public sealed class SshShellConnection : IConnection, IAsyncDisposable
             if (_process is { HasExited: false })
                 return;
 
-            StartShell();
+            await StartShellAsync(cancellationToken);
         }
         finally
         {
@@ -98,7 +98,7 @@ public sealed class SshShellConnection : IConnection, IAsyncDisposable
         }
     }
 
-    private void StartShell()
+    private async Task StartShellAsync(CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(_identityFilePath) && !File.Exists(_identityFilePath))
             throw new FileNotFoundException("SSH identity file was not found.", _identityFilePath);
@@ -108,12 +108,13 @@ public sealed class SshShellConnection : IConnection, IAsyncDisposable
             FileName = "ssh",
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            // Leave stderr unredirected so SSH system messages surface in the user's terminal.
-            RedirectStandardError = false,
+            RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
 
+        // This relay owns stdin/stdout for the remote shell protocol, so the local ssh
+        // client must not consume stdin for password or host-key prompts.
         psi.ArgumentList.Add("-o");
         psi.ArgumentList.Add("BatchMode=yes");
         psi.ArgumentList.Add("-o");
@@ -128,16 +129,80 @@ public sealed class SshShellConnection : IConnection, IAsyncDisposable
         }
 
         psi.ArgumentList.Add($"{_username}@{_host}");
+        psi.ArgumentList.Add("bash");
+        psi.ArgumentList.Add("-l"); // Login shell: sources ~/.bash_profile so the user's PATH and environment are set up.
 
         _logger.LogDebug("Starting persistent SSH shell to {User}@{Host}:{Port}.", _username, _host, _port);
 
-        var process = new Process { StartInfo = psi };
+        var stderrBuffer = new StringBuilder();
+        var process = new Process
+        { 
+            StartInfo = psi,
+            EnableRaisingEvents = true
+        };
+        
+        process.Exited += (_, _) =>
+        {
+            _isConnected = false;
+            _logger.LogDebug("SSH process exited with code {ExitCode}.", process.ExitCode);
+        };
+        
+        // Forward stderr lines in real-time (SSH uses stderr for diagnostics, warnings,
+        // host-key prompts, etc.) and also buffer them for error reporting on early exit.
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            _logger.LogWarning("SSH stderr: {Line}", e.Data);
+            lock (stderrBuffer) stderrBuffer.AppendLine(e.Data);
+        };
+
         if (!process.Start())
             throw new InvalidOperationException("Failed to start ssh process.");
 
+        process.BeginErrorReadLine();
+
         _process = process;
         _stdin = process.StandardInput;
+        _stdin.NewLine = "\n"; // Remote shell (Linux) expects Unix line endings; Windows StreamWriter defaults to \r\n.
         _stdout = process.StandardOutput;
+
+        // Probe the shell to confirm it is ready. This naturally blocks until SSH
+        // authentication completes and drains any banner/MOTD output before we
+        // hand control back to the caller.
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        probeCts.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            await _stdin.WriteLineAsync($"printf '{_sentinel}\\n'".AsMemory(), probeCts.Token);
+            await _stdin.FlushAsync(probeCts.Token);
+
+            while (true)
+            {
+                var line = await _stdout.ReadLineAsync(probeCts.Token);
+                if (line is null)
+                {
+                    await process.WaitForExitAsync(cancellationToken);
+                    string stderrOnExit;
+                    lock (stderrBuffer) stderrOnExit = stderrBuffer.ToString();
+                    throw new InvalidOperationException(
+                        $"SSH process exited (exit code {process.ExitCode}) before the shell was ready. " +
+                        (stderrOnExit.Length > 0 ? $"Output:{Environment.NewLine}{stderrOnExit.Trim()}" : "No output was captured."));
+                }
+
+                if (line.StartsWith(_sentinel, StringComparison.Ordinal))
+                    break; // Shell is ready and responsive.
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            string stderrOnTimeout;
+            lock (stderrBuffer) stderrOnTimeout = stderrBuffer.ToString();
+            throw new TimeoutException(
+                "SSH shell did not become ready within 30 seconds. " +
+                (stderrOnTimeout.Length > 0 ? $"SSH output:{Environment.NewLine}{stderrOnTimeout.Trim()}" : "No SSH output was captured."));
+        }
+
         _isConnected = true;
     }
 
@@ -162,19 +227,38 @@ public sealed class SshShellConnection : IConnection, IAsyncDisposable
 
             await _stdin.FlushAsync(cancellationToken);
         }
-        catch (IOException) when (_process is { HasExited: true } p)
+        catch (IOException ex) when (_process is { HasExited: true } p)
         {
             _isConnected = false;
             throw new IOException(
                 $"SSH shell process exited (code {p.ExitCode}) before the command could be sent. " +
-                "Check that SSH credentials are available (e.g. via ssh-agent) and that the host is reachable.");
+                "Check that SSH credentials are available (e.g. via ssh-agent) and that the host is reachable.",
+                ex);
         }
-
+        
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
         var output = new StringBuilder();
         while (true)
         {
             ArgumentNullException.ThrowIfNull(_stdout);
-            var line = await _stdout.ReadLineAsync(cancellationToken);
+            string? line;
+            try
+            {
+                line = await _stdout.ReadLineAsync(cts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException("Timed out waiting for command output. The SSH shell may be unresponsive.");
+            }
+            catch (IOException ex) when (_process is { HasExited: true } p)
+            {
+                _isConnected = false;
+                throw new IOException(
+                    $"SSH shell process exited (code {p.ExitCode}) while waiting for command output. " +
+                    "Check that SSH credentials are available (e.g. via ssh-agent) and that the host is reachable.",
+                    ex);
+            }
 
             if (line is null)
             {
