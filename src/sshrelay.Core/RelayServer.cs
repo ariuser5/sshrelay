@@ -41,11 +41,11 @@ public sealed class RelayServer
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Relay server listening on pipe '{PipeName}'.", _pipeName);
 
         _logger.LogDebug("Probing connection before accepting clients...");
         var probe = await _connection.ExecuteAsync("echo sshrelay-probe", cancellationToken);
         _logger.LogDebug("Connection probe succeeded: {ProbeResult}", probe.Trim());
+        _logger.LogInformation("Relay server listening on pipe '{PipeName}'.", _pipeName);
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -59,7 +59,7 @@ public sealed class RelayServer
             try
             {
                 await serverStream.WaitForConnectionAsync(cancellationToken);
-                _logger.LogDebug("Client connected.");
+                _logger.LogDebug("Incomming client connection.");
             }
             catch (OperationCanceledException)
             {
@@ -86,17 +86,15 @@ public sealed class RelayServer
             while (!cancellationToken.IsCancellationRequested)
             {
                 string? command;
-                try
-                {
+                try {
                     command = await reader.ReadLineAsync(cancellationToken);
                 }
-                catch (OperationCanceledException)
-                {
-                    break;
+                catch (OperationCanceledException) { 
+                    _logger.LogDebug("Cancellation requested while reading command from client.");
+                    break; 
                 }
-                catch (IOException)
-                {
-                    // Client disconnected mid-read.
+                catch (IOException){ 
+                    _logger.LogDebug("Client disconnected while reading command.");
                     break;
                 }
 
@@ -106,11 +104,11 @@ public sealed class RelayServer
                     break;
                 }
                 
-                _logger.LogDebug("Received command: '{Command}'.", command);
+                _logger.LogDebug("Received command from client.");
+                _logger.LogTrace("Received command: '{Command}'.", command);
 
                 string result;
-                try
-                {
+                try {
                     result = await _connection.ExecuteAsync(command, cancellationToken);
                 }
                 catch (Exception ex)
@@ -118,32 +116,30 @@ public sealed class RelayServer
                     _logger.LogError(ex, "Command execution failed for '{Command}'.", command);
                     result = $"ERROR: {ex.Message}";
                 }
-                
-                _logger.LogTrace("Command result: '{Result}'.", result);
 
                 try
                 {
+                    _logger.LogTrace("Forwarding command result: '{Result}'.", result);
+                    
                     // Base64-encode so the entire response fits on one wire line regardless of content.
                     await writer.WriteLineAsync(
                         Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(result)).AsMemory(),
                         cancellationToken);
                 }
-                catch (OperationCanceledException)
-                {
+                catch (OperationCanceledException) {
+                    _logger.LogDebug("Cancellation requested while sending response to client.");
                     break;
                 }
-                catch (IOException)
-                {
+                catch (IOException) {
+                    _logger.LogDebug("Client disconnected before receiving response.");
                     break;
                 }
             }
 
             if (serverStream.IsConnected)
-            {
                 serverStream.Disconnect();
-            }
 
-            _logger.LogDebug("Client command completed.");
+            _logger.LogDebug("End handling client command.");
         }
     }
 }
